@@ -60,6 +60,6 @@ lines follow it:
 
 Two hardening tasks from a security review (2026-10-19) stand beside them: task 006, a
 per-connection cap on a message's size, before the pool (done 2026-10-23), and task
-007, socket handles that a stale copy can't reach after close, which waits on
-goose-http.
+007, socket handles that a stale copy can't reach after close (dropped 2026-11-17 with
+`pg.socket`).
 

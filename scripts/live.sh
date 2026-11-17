@@ -2,11 +2,6 @@
 # Runs the session tests (test/session/) against a Postgres in Docker, through
 # scripts/relay.py, and checks each one's output against its golden file in
 # test/expected/, the same file its replay under test/run_tests.py checks.
-# The test `socket` (test/live/socket.goose) runs the facade over goose-http's
-# socket instead, once over TCP and once over a Unix socket, which
-# scripts/unix-forward.py serves, and checks both against socket.out. The
-# test `pool` (test/live/pool.goose) runs the pool on goose-http's loop, last,
-# since it ends the server's sessions and refuses new ones for a while.
 #
 # The server is HttpArena's: the postgres:18 image with user bench, password
 # bench, and database benchmark, seeded from HttpArena's data/pgdb-seed.sql at
@@ -16,8 +11,8 @@
 #   scripts/live.sh [--record] [TEST ...]
 #
 # Without TESTs it runs them all. --record writes each test's capture to
-# test/data/ and its output to test/expected/ (socket's and pool's output only), for a
-# new test or a new server version; review the diff.
+# test/data/ and its output to test/expected/, for a new test or a new server
+# version; review the diff.
 # PG_PORT picks the host port (default 55432), PG_IMAGE the image (default
 # postgres:18). GOOSE or GOOSE_COMMIT names the compiler (default: the pinned
 # release, scripts/goose.sh). Needs Docker, Python 3, and curl.
@@ -32,7 +27,7 @@ if [ "${1:-}" = --record ]; then
     record=1
     shift
 fi
-tests=${*:-arena pipeline cleartext cleartext_refused bad_password facade facade_login transaction socket pool}
+tests=${*:-arena pipeline cleartext cleartext_refused bad_password facade facade_login transaction}
 
 arena_commit=2d85137
 seed_sum=f020c2c6851ea1c53cd1b90c94baadd5645b2fc3e4caed5b0daf71a61bff9e21
@@ -51,13 +46,7 @@ if [ "${got%% *}" != "$seed_sum" ]; then
 fi
 
 name=goose-postgres-live-$port
-# The Unix socket's directory: short, since a socket's path has a limit of
-# about 100 bytes.
-sockdir=$(mktemp -d /tmp/goose-pg.XXXXXX)
-forward=
 cleanup() {
-    [ -z "$forward" ] || kill "$forward" 2>/dev/null || :
-    rm -rf "$sockdir"
     docker rm -f -v "$name" >/dev/null 2>&1 || :
 }
 docker rm -f -v "$name" >/dev/null 2>&1 || :
@@ -88,50 +77,7 @@ echo "$(docker exec "$name" postgres --version) on port $port"
 mkdir -p "$root/build/live"
 failed=0
 
-# Runs test/live/PROGRAM.goose, built, with ARGS into build/live/LABEL.out,
-# and checks it against test/expected/PROGRAM.out.
-live_run() {
-    program=$1
-    label=$2
-    shift 2
-    out=$root/build/live/$label.out
-    if ! "$root/build/live/$program" "$@" >"$out"; then
-        echo "FAIL $label: exit"
-        cat "$out"
-        failed=1
-    elif [ "$record" ] && [ "$label" = "$program" ]; then
-        cp "$out" "$root/test/expected/$program.out"
-        echo "recorded $program"
-    elif diff -u "$root/test/expected/$program.out" "$out"; then
-        echo "ok   $label"
-    else
-        echo "FAIL $label: output differs"
-        failed=1
-    fi
-}
-
-url=postgres://bench:bench@127.0.0.1:$port/benchmark
 for t in $tests; do
-    if [ "$t" = socket ]; then
-        "$GOOSE" build -o "$root/build/live/socket" "$root/test/live/socket.goose" >/dev/null
-        live_run socket socket "$url"
-        python3 "$root/scripts/unix-forward.py" "$sockdir/.s.PGSQL.$port" "$port" &
-        forward=$!
-        for i in $(seq 1 50); do
-            [ -S "$sockdir/.s.PGSQL.$port" ] && break
-            sleep 0.1
-        done
-        live_run socket socket-unix "$url" "$sockdir"
-        continue
-    fi
-    if [ "$t" = pool ]; then
-        "$GOOSE" build -o "$root/build/live/pool" "$root/test/live/pool.goose" >/dev/null
-        # The loops listen on Unix sockets in TMPDIR, whose paths must be short.
-        TMPDIR=$sockdir
-        export TMPDIR
-        live_run pool pool "$url"
-        continue
-    fi
     exe=$root/build/live/$t
     "$GOOSE" build -o "$exe" "$root/test/session/$t.goose" >/dev/null
     cap=$root/build/live/$t.cap

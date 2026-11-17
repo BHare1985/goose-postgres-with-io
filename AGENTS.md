@@ -14,7 +14,8 @@ read the file a task touches before starting it.
 - Task tracking: `tasks/` (see `tasks/README.md`)
 - The protocol: PostgreSQL's "Frontend/Backend Protocol" chapter (protocol 3.0), and
   RFC 5802 and RFC 7677 for SCRAM-SHA-256.
-- Its first user: Plod (`github.com/kaitk/plod`), through goose-http's outbound connections.
+- Its first user: Plod (`github.com/kaitk/plod`), which supplies the facade's transport,
+  and the pool for any program on a goose-io event loop (`docs/decisions.md`, 2026-11-17).
 - The language: the pinned Goose release's `docs/tutorial.md`, `docs/goose_spec.md`,
   `docs/stdlib.md`, and `docs/packages.md` (how a package declares the packages it
   needs). Read the tutorial before writing Goose; check the spec before assuming a
@@ -74,8 +75,11 @@ Several agents work in these repositories at once (2026-10-20).
 
 ## Goose, with no C
 
-- The package is Goose with no C. Sockets are goose-http's: the package does no I/O of
-  its own, and a gap there is fixed in goose-http, not worked around here.
+- The package is Goose with no C and does no I/O of its own: the protocol, the facade and
+  the tests take bytes and a transport the caller supplies. The pool (`pool.goose`) is the
+  one module that talks to an I/O library, goose-io's contract, on the event loop it is
+  given; it has no opinion on which loop that is or what else runs on it. A gap in goose-io
+  is fixed there, not worked around here.
 
 ## Code conventions
 

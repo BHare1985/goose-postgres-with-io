@@ -1,6 +1,8 @@
 # 007: Copies of a socket that outlive its close
 
-Status: todo. Waits on goose-http.
+Status: dropped (2026-11-17). `pg.socket` and `pg::Socket` are removed
+(`docs/decisions.md`, the last entry), so no handle of this package can outlive its close;
+a goose-io link is a slot and a generation, which a stale copy cannot reuse.
 
 `pg::Socket` holds goose-http's `http::Socket`, a fixed-size handle `{ fd }`, and
 `pg::Db` holds the `Socket` by value, so a program may copy either. Once one copy

@@ -419,3 +419,35 @@ users, is [architecture](architecture.md).
   ring and on IOCP, `wait_socket` fails with `ENOSYS`, and every pooled query fails
   with that reason. The module is `pg.pool`, beside `pg.socket`, which it imports
   for the server's address (2026-10-23, task 005).
+- **The pool is generic over goose-io's event loop, and goose-http keeps only the blocking
+  facade's socket.** The pool needs a connection's bytes, its opening and closing, and a clock,
+  which goose-io's contract gives on any loop that supplies it, so `pool.goose` calls the
+  contract's operations on the loop it is given (`dial`, `send`, `reset`, `now_ms`) and takes the
+  loop's events with `pg::pool_event`. This supersedes the decisions above that built the pool on
+  goose-http: its `wait_socket`, its mail, `later`, and `Reply`, and the module `pg.socket` that
+  the pool imported for the server's address, all of which belong to goose-http's server loop and
+  its exchanges. What the pool kept: a queue of waiting requests, which now holds their keys and
+  times and hands a connection over by making the first request its owner; each wait limited by
+  `ms` and renewed by its own connection's events; the statement cache; the failure codes. What it
+  gained: `pg::wake` names the one request an event concerns, so the program calls a request
+  when its connection has news and never scans the requests it has. What it lost: the program
+  does not give the pool a goose-http `Reply`, an event's kind, or a `CLOSED` for a client that
+  went (a request that is never called again is found by its time running out), and a host
+  name or a goose-http-only loop is not served. The host `/dir` dials the server's Unix socket
+  on a loop that supplies goose-io's unix group (contract 0.2). The pool copies each answer once,
+  from the loop's lent bytes into its connection's buffer, as goose-http's `recv` copied it from
+  the kernel (2026-11-17).
+- **The package imports no I/O library but goose-io, and only in the pool.** `pg.socket`, the
+  facade over goose-http's blocking socket, is removed with its live test, its relay for a Unix
+  socket, and goose-http's pin, so the protocol, the facade and the tests are sans-I/O and the
+  pool adds the I/O back through the contract. The facade keeps its transport, which the program
+  supplies; `pg::open` is gone, and the program opens its transport and calls `pg::connect`. A
+  program that wants a blocking socket takes one from its own I/O library or waits for a goose-io
+  event loop with a blocking layer on top: the contract has no blocking receive (2026-11-17).
+- **The pool finds its connection by the event's link, and takes no part in any other link's
+  events.** Contract 0.2 has no tag and no user value, so `pool_event` compares the event's link
+  with each connection's, a scan of the pool's size (a handful), and returns false for a link it
+  does not hold. A `goose_io::LinkMap` would be one lookup, but it holds an array and so cannot sit
+  in `Pool` beside `slots` (one resizable field to a struct); a scan keeps the pool one value the
+  program holds, with nothing else to build. Another library on the same loop is offered each event
+  the same way and takes its own; `test/io/pool_on_goose_io.goose` runs both on one loop (2026-11-17).

@@ -1,4 +1,13 @@
-# 005: A pool on goose-http's outbound connections
+# 005: A pool on a goose-io event loop
+
+Update 2026-11-17: the pool no longer runs on goose-http's loop. `pool.goose` is generic over a
+[goose-io](https://github.com/BHare1985/goose-io) event loop (`docs/decisions.md`, the entries of 2026-11-17):
+it takes the loop's events with `pg::pool_event` and names the request an event
+concerns with `pg::wake`. The design questions below were settled for goose-http and are kept
+as the record; where they speak of exchanges, mail, `later` and `wait_socket`, the pool now has a
+queue of request keys, `wake`, and per-wait limits renewed by a connection's events. The live
+test of step 4 went with the goose-http pool and is to be written again on a socket-backed
+goose-io loop; step 3, the Plod route, calls `pg::query` from a goose-io loop's handler.
 
 Status: in-progress. Steps 1 and 2 and the pool's part of step 4 are done
 (2026-10-23); see "Handover" at the end.
