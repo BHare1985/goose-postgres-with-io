@@ -19,7 +19,7 @@
 //
 // The transport is the caller's: a fixed-size value of any type T for which
 // namespace pg has these three overloads, which the facade calls by name and
-// Goose resolves per T, as goose-http's loop reaches TLS:
+// Goose resolves per T, as a TLS transport would be reached:
 //
 //   fn pg::send(t: T&, bytes: const u8[:]) -> bool   // all of bytes, or false
 //   fn pg::receive(t: T&, into: u8[>..]&) -> bool    // waits; appends at least

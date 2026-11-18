@@ -138,13 +138,17 @@ fn start(c: Conn&, out: u8[>..]&, cfg: Config, nonce: const u8[:]) {
         cstr(out, "database");
         ok = ok && cstr(out, cfg.database);
     }
-    guard ok else {
-        out.resize(at);
-        broken(c, "the user or database name holds a NUL byte");
-        return;
-    }
     cstr(out, "client_encoding");
     cstr(out, "UTF8");
+    if cfg.time_zone.len > 0 {
+        cstr(out, "TimeZone");
+        ok = ok && cstr(out, cfg.time_zone);
+    }
+    guard ok else {
+        out.resize(at);
+        broken(c, "the user, database or time zone holds a NUL byte");
+        return;
+    }
     out.push(0);
     patch32(out, at, out.len - at);
 }

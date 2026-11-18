@@ -16,6 +16,25 @@ None yet.
 
 ## Feature requests
 
+### No sockets in the standard library, and passing C a buffer takes the slice's layout
+
+Found on `v2026.4`, the package's own I/O (`net.goose`). Status: open; not reported
+
+`docs/stdlib.md` says networking is not in v1 and arrives as `extern fn`s. Binding the C
+library's socket calls works (`extern "libc.so.6" { ... }`), but C's buffer-and-length
+parameters have no direct form: an `extern fn` takes a slice `T[:]` as `{ data, len }`,
+and no raw pointer, so `send(fd, buf, len, flags)` is declared as
+`send(fd: i32, data: const u8[:], flags: i32)`. That is the same registers on the
+64-bit Linux ABIs, and it passes bytes and a length to C, but it depends on the
+calling convention and not on anything the language promises.
+
+    extern "libc.so.6" {
+        fn c_send(fd: i32, data: const u8[:], flags: i32) -> i64 = "send";
+    }
+
+Workaround: the declaration above, in `net.goose` only, with a comment that says why it
+holds. A pointer-and-length parameter form, or a stdlib `net`, would remove it.
+
 ### A block's result can't be held across a catcher without naming its type
 
 Found on `3ee3871` (`v2026.2`), task 004. Status: open; not reported

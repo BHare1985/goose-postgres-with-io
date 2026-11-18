@@ -1,8 +1,9 @@
 # 007: Copies of a socket that outlive its close
 
-Status: todo. Waits on goose-http.
+Status: todo. (2026-11-17: `pg::Socket` is the package's own now, so this no longer
+waits on goose-http; the fix is in `pg.net` and `pg.socket`.)
 
-`pg::Socket` holds goose-http's `http::Socket`, a fixed-size handle `{ fd }`, and
+`pg::Socket` holds a descriptor, a fixed-size handle `{ fd }`, and
 `pg::Db` holds the `Socket` by value, so a program may copy either. Once one copy
 closes, the others keep the same fd number, and the OS may hand that number to the
 next socket or file the process opens. A later `pg::send` or `pg::receive` through a

@@ -1,19 +1,38 @@
-# goose-postgres
+# goose-postgres-with-io
+
+> **goose-postgres-with-io is a fork of [goose-postgres](https://github.com/kaitk/goose-postgres).**
+> It is an experiment in adding I/O to it. goose-postgres is sans-I/O by nature: the
+> protocol is bytes in and bytes out. In practice it leans on goose-http for its sockets.
+> This fork removes that dependency and adds the I/O itself: its own sockets, an event
+> loop, and a pool on that loop. The loop has not been thoroughly tested or optimized,
+> because this is a demonstration.
+>
+> - If you can run goose-http, use the [upstream repo](https://github.com/kaitk/goose-postgres).
+> - If you want an efficient, sans-I/O client, look at
+>   [goose-io-postgres](https://github.com/BHare1985/goose-io-postgres), which runs on
+>   [goose-io](https://github.com/BHare1985/goose-io).
+>
+> This repo is really a demonstration of why you want goose-io. Compare it with upstream:
+> everything this fork adds (sockets, loop, pool wiring) is code that goose-io already
+> provides, so with goose-io you write far less.
 
 A PostgreSQL client for [Goose](https://github.com/aardappel/goose), in Goose: the
-frontend/backend protocol (version 3.0) as bytes in and bytes out, so the program's event
-loop owns the sockets and one thread can keep many connections busy. Queries pipeline:
-any number go out in one write, and each result comes back matched to its query. Its
-first user is [Plod](https://github.com/kaitk/plod), on goose-http's
-outbound connections ([architecture](docs/architecture.md)).
+frontend/backend protocol (version 3.0) as bytes in and bytes out, with nothing under
+it that belongs to a runtime or to another library. Queries pipeline: any number go out
+in one write, and each result comes back matched to its query. The package brings its
+own I/O as separate modules a program may take or leave: sockets over the C library
+(`pg.net`), a blocking socket for the facade (`pg.socket`), an event loop that keeps
+many connections busy on one thread (`pg.eventloop`), and a pool on that loop
+(`pg.pool`). Its first user is [Plod](https://github.com/kaitk/plod)
+([architecture](docs/architecture.md)).
 
 The protocol works against Postgres 18, and so does a blocking facade for Plod's
-lanes, over goose-http's blocking socket or a transport the program supplies:
+lanes, over the package's own socket or a transport the program supplies:
 `pg::query` with a block per row, `pg::exec`, errors through `pg::run`, and a
-`pg::transaction` block, nested as savepoints. A pool on goose-http's loop, a pool
-per worker, runs single queries for a route without a lane, as HttpArena's
-`/async-db` asks. Queries in parallel on the facade come next
-([tasks](tasks/README.md)).
+`pg::transaction` block, nested as savepoints. A pool on the package's event loop,
+a pool per loop, runs single queries for a request without a lane, as HttpArena's
+`/async-db` asks, and the same loop serves the program's own sockets. Queries in
+parallel on the facade come next ([tasks](tasks/README.md)).
 
 ## Status
 
@@ -28,8 +47,12 @@ per worker, runs single queries for a route without a lane, as HttpArena's
 | 🟢 | A blocking facade | For Plod's lane jobs: `pg::connect`, `pg::query` with a block per row, `pg::exec`, statements prepared once per connection, and errors through `pg::run` and `pg::fail`, over the program's transport. |
 | 🟢 | Transactions | `pg::transaction(db) { ... }` on the facade, as goose-sqlite's: it commits, or rolls back on a failed call or `pg::fail` and returns the error; nested, a savepoint that undoes only its own work. |
 | 🟡 | Queries in parallel | Several queries in one round trip on the facade (task 003). |
-| 🟢 | goose-http's blocking socket as the facade's transport | The module `pg.socket`: `pg::open` over TCP or a Unix socket, with a time limit on each wait. |
-| 🟡 | A pool | The module `pg.pool`: a pool per worker on goose-http's loop, `serve_epoll`'s or io_uring's, opened as requests need it, with a queue for requests that find no idle connection and reconnects after failures. Tested live on macOS; the Plod program for HttpArena's `/async-db` and its measurement are next (task 005). |
+| 🟢 | Sockets | The module `pg.net`: non-blocking TCP and Unix sockets and `poll`, bound from the C library with no C of the package's own. Linux only for now. |
+| 🟢 | A blocking socket as the facade's transport | The module `pg.socket`: `pg::open` over TCP or a Unix socket, with a time limit on each wait. |
+| 🟢 | An event loop | The module `pg.eventloop`: dial, listen, send with backpressure, timers, and one handler called with each event, on one thread. |
+| 🟢 | A pool | The module `pg.pool`, which does no I/O and imports no loop: a pool per loop for a host that owns the sockets, the package's own event loop (`pg.looppool`) or a server's, opened as requests need it, with a queue for requests that find no idle connection, a wake for the request an event concerns, per-wait time limits, and reconnects after failures. Tested against Postgres 18 in Docker, 40 requests at once on 4 connections and on 1; the Plod program for HttpArena's `/async-db` and its measurement are next (task 005). |
+| 🔴 | Host names | No name is resolved: a host is an IPv4 address, `localhost`, or a Unix socket's directory. |
+| 🔴 | macOS and Windows | `pg.net` has Linux's constants and socket layout. |
 | 🔴 | TLS | Through goose-tls's client mode, for servers that ask for it. Until then a URL with `sslmode=require`, `verify-ca`, or `verify-full` is refused. |
 | 🔴 | More types | Floats, `numeric`, dates and times, `uuid`, and arrays; `pg::bytes` gives their raw bytes. |
 
@@ -88,15 +111,13 @@ already uses.
 ### The blocking facade
 
 A thread that runs no event loop, such as a
-Plod lane, calls the facade, which sends and waits on goose-http's blocking
-socket through the module `pg.socket`. The root file declares goose-http too, at the
-tag `socket.goose` names
-([architecture](docs/architecture.md#goose-https-socket)):
+Plod lane, calls the facade, which sends and waits on the package's own blocking
+socket through the module `pg.socket`, or on a transport the program supplies
+([architecture](docs/architecture.md#the-package-sockets)):
 
 ```goose
 import std;
 import hash from "github.com/kaitk/goose-hash@v0.0.4";
-import http from "github.com/kaitk/goose-http@v0.5.16";
 import pg from "github.com/kaitk/goose-postgres@v0.0.10";
 import pg.socket;
 ```
@@ -125,10 +146,42 @@ let errs = pg::transaction(db) {
 };
 ```
 
-Without `pg.socket`, a program needs no goose-http, and the facade runs over any
-fixed-size value with `pg::send`, `pg::receive`, and `pg::close` overloads
+Without `pg.socket`, the facade runs over any fixed-size value with `pg::send`,
+`pg::receive`, and `pg::close` overloads
 ([architecture](docs/architecture.md#the-transport)), connected with
 `pg::connect(db, cfg)`.
+
+### The pool on the event loop
+
+A program that serves many requests on one thread runs the package's event loop and keeps
+a pool on it. Each event goes to the pool, which names the requests it concerns, and a
+request is called again each time:
+
+```goose
+import pg from "github.com/kaitk/goose-postgres@v0.0.10";
+import pg.eventloop;
+import pg.looppool;     // the package's loop as a host of the pool
+import pg.pool;
+```
+
+```goose
+var lp = pg::Loop { .. };
+var db = pg::pool(cfg, 4);                       // four connections, opened as needed
+lp.serve() { lp, ev =>
+    pg::pool_event(db, lp, ev);                  // the pool's links, and the time
+    loop {
+        let key = pg::wake(db);                  // the request whose connection has news, or 0
+        if key == 0 { break; }
+        ... call the request whose ticket.key is key ...
+    }
+};
+
+// a request, at its start and each time wake names it:
+let n = pg::query(db, ticket, lp, 5000, "SELECT id FROM items WHERE id <= $1", 10) { r =>
+    ... pg::int(r, 0) ...
+};
+if n == pg::WAITS { return; }                    // called again when wake names it
+```
 
 ## API
 
@@ -167,7 +220,7 @@ The facade ([architecture](docs/architecture.md#the-facade)):
 
 - `pg::Db { t: transport, .. }`: a connection over a transport, such as
   `pg::Socket { .. }` from `pg.socket`.
-- `pg::open(db, cfg or url, ms)`, in `pg.socket`: connects goose-http's socket, over
+- `pg::open(db, cfg or url, ms)`, in `pg.socket`: connects the package's socket, over
   TCP, or a Unix socket for a host that starts with `/`, then runs `pg::connect`.
 - `pg::connect(db, cfg or url)`: authenticates, with SCRAM's nonce from
   `hash::random_bytes`.
@@ -186,13 +239,30 @@ The facade ([architecture](docs/architecture.md#the-facade)):
 
 The pool, in `pg.pool` ([architecture](docs/architecture.md#the-pool)):
 
-- `pg::pool(cfg, size) -> Pool`: a worker's connections, opened as requests need them.
-- `pg::Ticket { .. }`: a request's place with the pool, in its state.
-- `pg::query(pool, t, out, kind, data, ms, sql, p1, ..., p8) { r => ... } -> i64`:
-  called at the request and at each later event; `pg::WAITS` while the exchange
+- `pg::pool(cfg, size) -> Pool`: a loop's connections, opened as requests need them.
+- Events, from the host's own: `pg::pool_opened(pool, h)`, `pg::pool_data(pool, host, h, bytes)`,
+  `pg::pool_closed(pool, h, why)`, `pg::pool_tick(pool, now_ms)`; each says whether `h`, the
+  host's handle for a connection, was the pool's. On the package's loop, `pg::pool_event(pool,
+  lp, ev)` in `pg.looppool` makes the four calls. Then take `pg::wake(pool)` until it gives 0,
+  the key of each request to call.
+- What the pool asks of its host, declared into namespace `pg` for the host's loop type:
+  `host_dial(io, where, ms) -> i64` (a handle, 0 to refuse), `host_send(io, h, bytes) -> bool`,
+  `host_close(io, h)`, and `host_now_ms(io) -> i64`.
+- `pg::Ticket { .. }`: a request's place with the pool, in its state; `t.key` is what `wake` gives.
+- `pg::query(pool, t, lp, ms, sql, p1, ..., p8) { r => ... } -> i64`:
+  called at the request and each time `wake` names it; `pg::WAITS` while the request
   waits, the count once the block has seen every row, or `pg::FAILS`, with `t.code`
   and `pool.reason`.
-- `pg::close(pool)`.
+- `pg::close(pool, lp)`: ends the sessions and closes the links, when the loop is stopping.
+
+The event loop, in `pg.eventloop` ([architecture](docs/architecture.md#the-event-loop)):
+
+- `pg::Loop { .. }`, `lp.serve() { lp, ev => ... }`, `lp.stop()`: run it until stopped.
+- `lp.step(max_wait_ms) { lp, ev => ... } -> bool`: one pass, for a host with a loop of its own.
+- `lp.dial(address, connect_ms) -> Link`, `lp.listen(address) -> Link, errno`,
+  `lp.send(link, bytes) -> SendResult`, `lp.close(link)`, `lp.now_ms()`, `lp.tick_by(ms)`.
+- Events: `Opened`, `Data`, `Writable`, `Closed`, and `Tick`. An address is `a.b.c.d:port`
+  or `unix:/path`.
 
 ## Credits
 
@@ -211,8 +281,11 @@ scram.goose    SCRAM-SHA-256
 decode.goose   reading rows, columns, errors, and command tags
 url.goose      Config, and postgres:// URLs
 facade.goose   the blocking facade: Db, connect, query, exec, run, and fail
-socket.goose   the module pg.socket: the facade over goose-http's socket, and open
-pool.goose     the module pg.pool: a pool per worker on goose-http's loop
+net.goose      the module pg.net: sockets and poll, bound from the C library
+socket.goose   the module pg.socket: the facade over a blocking socket, and open
+eventloop.goose  the module pg.eventloop: the event loop
+pool.goose     the module pg.pool: a pool per loop, for any host that owns the sockets
+looppool.goose the module pg.looppool: the package's event loop as a host of the pool
 test/          unit tests, session tests that replay captures from Postgres, and
                test/live/, which needs one
 scripts/       the Goose pin, the test scripts, and the live run in Docker with its relay
@@ -226,7 +299,7 @@ tasks/         task tracking (tasks/README.md)
 |---|---|---|
 | Goose compiler | `aardappel/goose` release `v2026.4` (`6c1fbc7`), which the scripts fetch ([setup](docs/development.md#set-up-the-goose-compiler)) | An official release builds the same on every platform; a commit is pinned only for a fix not yet released |
 | goose-hash | `github.com/kaitk/goose-hash@v0.0.4`, in each file that imports it | SHA-256, HMAC-SHA-256, and PBKDF2 for SCRAM, and `hash::random_bytes` for its nonce |
-| goose-http | `github.com/kaitk/goose-http@v0.5.16`, in `socket.goose`, `pool.goose`, and the programs that import them ([pin](docs/development.md#the-goose-http-pin)) | Its outbound connections: the blocking socket for `pg.socket`, and waiting on a socket on the worker's loop, epoll's and io_uring's; Plod's pin |
+| The C library | `libc.so.6`, bound by name when the program starts | The socket calls and `poll` of `pg.net`; nothing is linked or compiled for it |
 | Postgres | `postgres:18` in `scripts/live.sh`; the captures are from 18.0, `transaction`'s from 18.4 | The version HttpArena runs |
 | Test data | HttpArena `2d85137`'s `data/pgdb-seed.sql`, checked by SHA-256 in `scripts/live.sh` | The `/async-db` profile's table |
 

@@ -13,7 +13,7 @@ Terminate: X\00\00\00\04
 room after four entries: 1020
 -- a NUL byte in a string, which would end it early
 a user with a NUL: nothing written: ok
-  the user or database name holds a NUL byte
+  the user, database or time zone holds a NUL byte
 Parse of SQL with a NUL: -1
   out: kept
   a statement's name or SQL holds a NUL byte, ready: false

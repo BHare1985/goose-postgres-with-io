@@ -14,7 +14,9 @@ read the file a task touches before starting it.
 - Task tracking: `tasks/` (see `tasks/README.md`)
 - The protocol: PostgreSQL's "Frontend/Backend Protocol" chapter (protocol 3.0), and
   RFC 5802 and RFC 7677 for SCRAM-SHA-256.
-- Its first user: Plod (`github.com/kaitk/plod`), through goose-http's outbound connections.
+- Its first user: Plod (`github.com/kaitk/plod`), which can use the facade over the
+  package's blocking socket, or the pool on the package's event loop
+  (`docs/decisions.md`, 2026-11-17).
 - The language: the pinned Goose release's `docs/tutorial.md`, `docs/goose_spec.md`,
   `docs/stdlib.md`, and `docs/packages.md` (how a package declares the packages it
   needs). Read the tutorial before writing Goose; check the spec before assuming a
@@ -74,8 +76,13 @@ Several agents work in these repositories at once (2026-10-20).
 
 ## Goose, with no C
 
-- The package is Goose with no C. Sockets are goose-http's: the package does no I/O of
-  its own, and a gap there is fixed in goose-http, not worked around here.
+- The package is Goose with no C of its own. The protocol, the facade, and their tests do
+  no I/O. The I/O modules (`net.goose`, `socket.goose`, `eventloop.goose`, `looppool.goose`)
+  bind the C library's socket calls by name and import no I/O library; `pool.goose` does no
+  I/O and imports no loop, the host lends it its sockets, so a program's
+  runtime, event loop, or other libraries decide nothing about whether it can use the
+  package. Keep it so: a change that makes a module import a runtime goes in a different
+  package.
 
 ## Code conventions
 

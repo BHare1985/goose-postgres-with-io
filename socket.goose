@@ -1,10 +1,8 @@
-// goose-http's blocking socket as the facade's transport, for a thread that
-// runs no event loop, such as a Plod lane. Only a program that imports
-// this module needs goose-http, which its root file declares at the
-// reference this file names:
+// A blocking socket as the facade's transport, for a thread that runs no event
+// loop, such as a Plod lane. It is the package's own (net.goose): a program
+// that imports this module needs no I/O library.
 //
 //   import pg from "github.com/kaitk/goose-postgres@<tag>";
-//   import http from "github.com/kaitk/goose-http@v0.5.16";
 //   import pg.socket;
 //
 //   var db = pg::Db { t: pg::Socket { .. }, .. };
@@ -19,31 +17,60 @@
 namespace pg;
 
 import std;
-import http from "github.com/kaitk/goose-http@v0.5.16";
+import .net;
 
 // The bytes a receive makes room for at once.
 let RECEIVE_CHUNK = 16384;
 
 // A connection to the server, and the limit in milliseconds on each wait
 // (-1: none). Build it empty, `pg::Socket { .. }`, and let open connect it.
-struct Socket { s: http::Socket, ms: i64 = -1 }
+struct Socket { fd: i64 = -1, ms: i64 = -1 }
 
-fn pg::send(t: pg::Socket&, bytes: const u8[:]) -> bool {
-    t.s.fd >= 0 && http::send_all(t.s, bytes, t.ms).code == 0
+// Waits until fd is ready for events, for at most ms (-1: no limit). False if
+// the time ran out or the wait failed.
+fn ready_within(fd: i64, events: i16, ms: i64) -> bool {
+    var fds: PollFd[1] = [PollFd { fd: fd as i32, events: events, .. }];
+    let start = clock_ms();
+    loop {
+        let left = if ms < 0 { -1 } else { max(ms - (clock_ms() - start), 0) };
+        let n = wait_ready(fds[..], left);
+        if n > 0 { return true; }
+        if n < 0 || (ms >= 0 && clock_ms() - start >= ms) { return false; }
+    }
 }
 
-fn pg::receive(t: pg::Socket&, into: u8[>..]&) -> bool {
-    guard t.s.fd >= 0 else { return false; }
-    // The facade passes into from the Db that holds t, which rules out
-    // resizing it, so the bytes come through buf.
-    var buf: u8[pg::RECEIVE_CHUNK] = [0; pg::RECEIVE_CHUNK];
-    let n = http::recv(t.s, buf, t.ms);
-    guard n > 0 else { return false; }
-    into.append(buf[..n]);
+fn pg::send(t: pg::Socket&, bytes: const u8[:]) -> bool {
+    guard t.fd >= 0 else { return false; }
+    var at = 0;
+    while at < bytes.len {
+        let n = send_some(t.fd, bytes[at..]);
+        if n >= 0 { at += n; }
+        else if n == -EAGAIN { guard ready_within(t.fd, POLLOUT, t.ms) else { return false; } }
+        else { return false; }
+    }
     return true;
 }
 
-fn pg::close(t: pg::Socket&) { http::hangup(t.s); }
+fn pg::receive(t: pg::Socket&, into: u8[>..]&) -> bool {
+    guard t.fd >= 0 else { return false; }
+    // The facade passes into from the Db that holds t, which rules out
+    // resizing it, so the bytes come through buf.
+    var buf: u8[pg::RECEIVE_CHUNK] = [0; pg::RECEIVE_CHUNK];
+    loop {
+        let n = recv_some(t.fd, buf[..]);
+        if n > 0 {
+            into.append(buf[..n]);
+            return true;
+        }
+        guard n == -EAGAIN else { return false; }
+        guard ready_within(t.fd, POLLIN, t.ms) else { return false; }
+    }
+}
+
+fn pg::close(t: pg::Socket&) {
+    close_fd(t.fd);
+    t.fd = -1;
+}
 
 // Connects db's socket to cfg's host and port, each wait limited to ms
 // milliseconds (-1: none), then starts the session as connect does. A host
@@ -54,33 +81,39 @@ fn pg::close(t: pg::Socket&) { http::hangup(t.s); }
 fn open(db: Db<Socket>&, cfg: Config, ms) {
     close(db);
     let where = socket_address(cfg);
-    let s, e = http::connect(where, cfg.port, ms);
-    guard e.code == 0 else { fail(SQLCLIENT_UNABLE_TO_ESTABLISH_SQLCONNECTION, cant_connect(where, cfg.port, e)); }
-    db.t = Socket { s: s, ms: ms };
+    let a, ok = address(where[..]);
+    guard ok else { fail(SQLCLIENT_UNABLE_TO_ESTABLISH_SQLCONNECTION, cant_connect(where[..], "the address is not numeric: no name is resolved")); }
+    let fd, e = connect_start(a);
+    guard e == 0 else { fail(SQLCLIENT_UNABLE_TO_ESTABLISH_SQLCONNECTION, cant_connect(where[..], reason(-e))); }
+    var result = 0;
+    if ready_within(fd, POLLOUT, ms) { result = connect_result(fd); } else { result = -ETIMEDOUT; }
+    guard result == 0 else {
+        close_fd(fd);
+        fail(SQLCLIENT_UNABLE_TO_ESTABLISH_SQLCONNECTION, cant_connect(where[..], reason(-result)));
+    }
+    db.t = Socket { fd: fd, ms: ms };
     connect(db, cfg);
 }
 
-// The address goose-http connects to for cfg: its host, or unix: and the
-// server's socket in the directory a host that starts with / names. cfg is
-// a Config; untyped, so that `goose check` of this file alone, which doesn't
-// see pg.goose, takes it.
+// What a Config's server is connected at: its host and port, or unix: and the
+// server's socket in the directory a host that starts with / names. cfg is a
+// Config; untyped, so that `goose check` of this file alone, which doesn't see
+// pg.goose, takes it.
 fn socket_address(cfg) -> u8[>..] {
     var where: u8[>..] = [];
     if cfg.host.len > 0 && cfg.host[0] == '/' {
         format(where, "unix:", cfg.host, if cfg.host[cfg.host.len - 1] == '/' { "" } else { "/" },
                ".s.PGSQL.", cfg.port);
     } else {
-        where.append(cfg.host);
+        format(where, cfg.host, ":", cfg.port);
     }
     return where;
 }
 
-// Why a connect to where and port failed, for an Error's message.
-fn cant_connect(where: const u8[:], port: i64, e: http::Error) -> u8[] {
+// Why a connect to where failed, for an Error's message.
+fn cant_connect(where: const u8[:], why: const u8[:]) -> u8[] {
     var message: u8[>..] = [];
-    format(message, "can't connect to ", where);
-    if !starts_with(where, "unix:") { format(message, " port ", port); }
-    format(message, ": ", e.call, " ", reason(e.code));
+    format(message, "can't connect to ", where, ": ", why);
     return str(message);
 }
 
@@ -95,9 +128,10 @@ fn open(db: Db<Socket>&, url: const u8[:], ms) {
 // The common reasons a connect fails, by name; others by their number.
 fn reason(code: i64) -> u8[] {
     var r: u8[>..] = [];
-    if code == http::ECONNREFUSED { r.append("ECONNREFUSED"); }
-    else if code == http::ETIMEDOUT { r.append("ETIMEDOUT"); }
-    else if code == http::ENOENT { r.append("ENOENT"); }
+    if code == ECONNREFUSED { r.append("ECONNREFUSED"); }
+    else if code == ETIMEDOUT { r.append("ETIMEDOUT"); }
+    else if code == ENOENT { r.append("ENOENT"); }
+    else if code == ENETUNREACH || code == EHOSTUNREACH { r.append("EHOSTUNREACH"); }
     else { format(r, "error ", code); }
     return str(r);
 }

@@ -1,4 +1,4 @@
-// The blocking facade over goose-http's socket (socket.goose), against a
+// The blocking facade over the package's own socket (socket.goose), against a
 // server that scripts/live.sh starts: connects that fail, then a session as
 // test/session/facade.goose runs it, and a connection made again.
 //
@@ -8,7 +8,6 @@
 // that directory instead of TCP; its output is the same.
 import std;
 import hash from "github.com/kaitk/goose-hash@v0.0.4";
-import http from "github.com/kaitk/goose-http@v0.5.16";
 import pg from "../../";
 import pg.socket;
 import wire from "../lib/wire/";
@@ -48,7 +47,7 @@ fn main() {
     wire::errors("before connecting", pg::run() { pg::exec(db, "SELECT 1"); });
     wire::errors("connect", pg::run() { pg::open(db, cfg, LIMIT); });
     wire::facade(db);
-    print("socket closed: ", db.t.s.fd == -1);
+    print("socket closed: ", db.t.fd == -1);
 
     wire::errors("open again", pg::run() {
         pg::open(db, cfg, LIMIT);
@@ -57,6 +56,15 @@ fn main() {
         };
         pg::open(db, cfg, LIMIT);
         print("open on an open connection: ", pg::exec(db, "SELECT 1"));
+    });
+    // A session parameter in the startup message, with nothing to SET afterwards.
+    var tz = cfg;
+    tz.time_zone.append("Asia/Tokyo");
+    wire::errors("time zone", pg::run() {
+        pg::open(db, tz, LIMIT);
+        pg::query(db, "SELECT current_setting('TimeZone')") { r =>
+            print("TimeZone: ", pg::text(r, 0));
+        };
     });
     pg::close(db);
 }
