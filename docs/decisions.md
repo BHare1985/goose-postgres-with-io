@@ -419,3 +419,54 @@ users, is [architecture](architecture.md).
   ring and on IOCP, `wait_socket` fails with `ENOSYS`, and every pooled query fails
   with that reason. The module is `pg.pool`, beside `pg.socket`, which it imports
   for the server's address (2026-10-23, task 005).
+- **The package brings its own I/O, and imports no runtime.** The pool had been built on
+  goose-http's loop, and the facade's blocking socket on goose-http's socket, so a program
+  needed goose-http to use either, and the pool could not run beside any other event loop.
+  The package now has four modules of its own, and no import of an I/O library: `pg.net`
+  (sockets and `poll`, bound by name from the C library), `pg.socket` (the same API as
+  before, over `pg.net`), `pg.eventloop` (one thread, many connections, one handler called
+  with each event) and `pg.pool` (on that loop). This supersedes the decisions above that
+  built the pool on goose-http's `wait_socket`, mail, `later` and `Reply`, and kept the
+  facade's socket in goose-http. The protocol, the facade and `Db`'s transport are as they
+  were, so a program can still run the package under any other loop by supplying a
+  transport or by driving `step` itself (2026-11-17).
+- **`poll`, not `epoll`.** One call, the same on Linux and macOS, and a table the loop
+  rebuilds each pass. A database client keeps a few connections; at ten thousand the
+  rebuild would cost, and `epoll` or `kqueue` would replace `poll` in `net.goose` and
+  `eventloop.goose` alone (2026-11-17).
+- **No name is resolved.** `getaddrinfo` blocks, so it cannot run in a loop, and a thread
+  per lookup would make the package own threads. An address is an IPv4 address, `localhost`,
+  or a Unix socket's directory, and a name fails as "the address is not numeric". A program
+  that has a name resolves it first, with whatever it has (2026-11-17).
+- **The loop is the contract's smallest useful shape.** Dial, listen, send with a
+  buffer of 64 KiB and a `Writable` after a `Full`, close, a clock, a timer, and
+  `Opened`/`Data`/`Writable`/`Closed`/`Tick`. A link is a slot and a generation, so an ended
+  link names nothing. It has no half-close, no read pause and no batching; the pool does
+  not need them and the cost of each falls on every user of the loop (2026-11-17).
+- **The pool finds its connection by the event's link, and ignores every other link's.**
+  A scan of the pool's few slots, not a map keyed by link: a map holds an array and cannot
+  sit in `Pool` beside `slots` (one resizable field to a struct). Another library on the
+  same loop is offered each event the same way and takes its own;
+  `test/net/pool_loop.goose` runs both (2026-11-17).
+- **The loop removes a Unix socket file it created, and never replaces one.** A
+  `listen` on a path that exists fails with `EADDRINUSE`, and the loop removes its
+  listener's path when the listener ends. It sets no mode: the file has the process's
+  `umask` (2026-11-17).
+- **The pool is host-agnostic: it asks its host for four operations and takes four events.**
+  A pool that calls the package's own `pg::Loop` cannot run in a server that has a loop of its
+  own, since that server's thread already blocks in its loop and the package's sockets are not
+  in its poll set. So `pool.goose` imports no loop. The host declares `host_dial`, `host_send`,
+  `host_close` and `host_now_ms` for its loop type, in namespace `pg`, as the facade's
+  transport is declared, and calls `pool_opened`, `pool_data`, `pool_closed` and `pool_tick`
+  from its own events; a connection is the host's `i64` handle, which the pool only compares.
+  The package's loop is a host like any other, in `looppool.goose`. A dial the host refuses
+  returns 0 and the request fails at once (2026-11-17).
+- **`Loop::step` runs one pass, so a host can drive the loop.** `serve` is `step` in a loop.
+  The wait is a `poll` over the loop's own descriptors, which a host cannot add to its own
+  poll set, so a host that blocks in its own loop calls `step` at the rate it needs the
+  loop's timers and reads served; the loop is not a thing to embed in an epoll (2026-11-17).
+- **A session's TimeZone is a `Config` field, sent in the startup message.** `Config.time_zone`
+  (empty: the server's) goes into the startup packet beside `client_encoding`, so every
+  connection starts in it and nothing is `SET` afterwards. The pool does not pipeline several
+  calls on one connection, and it returns the text format only: a request is one statement
+  and one round trip (2026-11-17).

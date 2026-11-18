@@ -1,0 +1,20 @@
+listening: true
+send before open: true
+bad address ended: true
+server accepted, from the listener: true
+client opened, listener valid: false
+client sends: true
+refused dial ended: true
+server got: ping
+server replies: true
+client got: pong
+a send was refused as Full: true
+a send past max_send: true
+client received every byte: true
+client end: true
+server end: true
+ticks came: true
+Writable followed the Full: true
+every link opened and closed: true
+a second serve returns at once: true
+dial after finish: true

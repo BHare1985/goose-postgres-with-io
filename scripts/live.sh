@@ -2,11 +2,11 @@
 # Runs the session tests (test/session/) against a Postgres in Docker, through
 # scripts/relay.py, and checks each one's output against its golden file in
 # test/expected/, the same file its replay under test/run_tests.py checks.
-# The test `socket` (test/live/socket.goose) runs the facade over goose-http's
-# socket instead, once over TCP and once over a Unix socket, which
+# The test `socket` (test/live/socket.goose) runs the facade over the package's
+# own socket instead, once over TCP and once over a Unix socket, which
 # scripts/unix-forward.py serves, and checks both against socket.out. The
-# test `pool` (test/live/pool.goose) runs the pool on goose-http's loop, last,
-# since it ends the server's sessions and refuses new ones for a while.
+# test `pool` (test/live/pool.goose) runs the pool on the package's own event
+# loop, with no relay, and checks its output against pool.out.
 #
 # The server is HttpArena's: the postgres:18 image with user bench, password
 # bench, and database benchmark, seeded from HttpArena's data/pgdb-seed.sql at
@@ -126,9 +126,6 @@ for t in $tests; do
     fi
     if [ "$t" = pool ]; then
         "$GOOSE" build -o "$root/build/live/pool" "$root/test/live/pool.goose" >/dev/null
-        # The loops listen on Unix sockets in TMPDIR, whose paths must be short.
-        TMPDIR=$sockdir
-        export TMPDIR
         live_run pool pool "$url"
         continue
     fi

@@ -1,6 +1,6 @@
-refused: 08001 can't connect to 127.0.0.1 port 1: connect ECONNREFUSED
-no Unix socket: 08001 can't connect to unix:/nonexistent/.s.PGSQL.1: connect ENOENT
-a host name: 08001 can't connect to db.invalid port 1: resolve ENOENT
+refused: 08001 can't connect to 127.0.0.1:1: ECONNREFUSED
+no Unix socket: 08001 can't connect to unix:/nonexistent/.s.PGSQL.1: ENOENT
+a host name: 08001 can't connect to db.invalid:1: the address is not numeric: no name is resolved
 not a URL: 08001 not a postgres:// URL
 before connecting: 08003 the connection isn't open
 connect: no error
@@ -47,3 +47,5 @@ socket closed: true
 items: 10
 open on an open connection: 1
 open again: no error
+TimeZone: Asia/Tokyo
+time zone: no error

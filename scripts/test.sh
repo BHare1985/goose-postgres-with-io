@@ -1,6 +1,6 @@
 #!/bin/sh
 # Runs every test that needs no server, and fails on the first step that
-# fails: the typecheck of pg.goose, of socket.goose with goose-http, of each
+# fails: the typecheck of pg.goose, of socket.goose, of each
 # test helper under test/lib/, and of the programs under test/live/, then the tests
 # under test/<area>/ (test/run_tests.py, which reports all of its failures),
 # the session tests among them replaying their captures. scripts/live.sh runs

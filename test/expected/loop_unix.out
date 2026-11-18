@@ -1,0 +1,7 @@
+listening: true
+a second listener at the same path: true in use: true
+accepted on the path: true
+server got: ping
+client got: pong
+a reply came: true
+the path was removed when the listener ended: true

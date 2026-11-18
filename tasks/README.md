@@ -48,18 +48,17 @@ for the latest measurements.
 Task 001, the wire protocol, is done but for its last step, which is task 005's. Two
 lines follow it:
 
-- For goose-rest's lane jobs: task 002, the blocking facade, over goose-http's
+- For goose-rest's lane jobs: task 002, the blocking facade, over the package's own
   blocking socket or a transport the caller supplies, which waits only on goose-rest's
   port of a use case to it; then
   task 003, queries in parallel on one connection, and task 004, the transaction
-  block, which goose-sqlite's task 003 matches (done 2026-11-12). Neither waits on
-  goose-http.
-- For HttpArena: task 005, the pool on goose-http's outbound connections (its task
-  053), which answers `/async-db`. The pool is built (2026-10-23); Plod's program,
+  block, which goose-sqlite's task 003 matches (done 2026-11-12).
+- For HttpArena: task 005, the pool, which answers `/async-db`. The pool is built, on the
+  package's own event loop (2026-11-17), and tested against Postgres 18; Plod's program,
   HttpArena's validation, and a measurement remain.
 
 Two hardening tasks from a security review (2026-10-19) stand beside them: task 006, a
 per-connection cap on a message's size, before the pool (done 2026-10-23), and task
-007, socket handles that a stale copy can't reach after close, which waits on
-goose-http.
+007, socket handles that a stale copy can't reach after close, which now concerns the
+package's own `pg::Socket` and waits on nothing.
 

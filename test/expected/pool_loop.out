@@ -1,0 +1,24 @@
+-- two requests, one connection: the second waits in the queue
+request 1 row: 1 one
+request 1 row: 2 two
+request 1: 2 rows
+request 2 failed 42601 syntax error
+the password went in cleartext: ok
+the parameter went as text: ok
+-- a server that refuses
+request 1 failed 08001 can't connect to 127.0.0.1:1: refused
+-- a host name: the loop resolves none
+request 1 failed 08001 can't connect to db.example.com:5432: not an address the host accepts (a name is not resolved)
+-- a server that never answers: the request that runs and the one that waits both time out
+request 1 failed 08006 the database didn't answer in time
+request 2 failed 08006
+the timed-out request gave its connection up: ok
+and the connection was hung up, as a server that doesn't answer may not answer at all: ok
+-- the pool and another library on one loop: each takes only its own events
+request 1 row: 1 one
+request 1 row: 2 two
+request 1: 2 rows
+the other library got its 11 bytes: ok
+the pool's request finished: ok
+no event was taken by both libraries: ok
+each library took events: ok

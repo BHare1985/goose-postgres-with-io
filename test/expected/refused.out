@@ -1,5 +1,5 @@
 a URL user with a NUL: 08001 not a postgres:// URL
-a Config user with a NUL: 08001 the user or database name holds a NUL byte
+a Config user with a NUL: 08001 the user, database or time zone holds a NUL byte
 nothing sent: ok
 connect: no error
 SQL with a NUL: 22021 the SQL holds a NUL byte

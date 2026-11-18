@@ -1,0 +1,4 @@
+the exchange finished: true
+the host's work ran between passes: true
+the loop finished: true
+a step after the end returns false: true

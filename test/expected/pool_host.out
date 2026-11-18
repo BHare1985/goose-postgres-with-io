@@ -1,0 +1,16 @@
+-- a query on a host of its own
+host: dial 10.1.2.3:5432 within 1000 ms
+waits for the dial: true
+row 41
+row 42
+rows: 2
+the password went in cleartext: ok
+-- handles that are not the pool's are none of its business
+opened: false
+data: false
+closed: false
+-- a host that refuses the dial
+failed: true 08001 can't connect to 10.1.2.4:5432: failed
+-- the time runs out
+host: dial 10.1.2.5:5432 within 1000 ms
+failed: true 08006 the database didn't answer in time

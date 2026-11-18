@@ -16,6 +16,9 @@ struct Config {
     user: u8[..63],
     password: u8[..255],
     database: u8[..63],
+    // The session's TimeZone, such as "UTC", sent in the startup message so that every
+    // connection starts with it and nothing has to SET it after. Empty: the server's.
+    time_zone: u8[..63],
     allow_cleartext: bool = false,
     max_message: i64 = DEFAULT_MAX_MESSAGE,
 }

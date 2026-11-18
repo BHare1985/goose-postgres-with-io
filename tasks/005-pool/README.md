@@ -1,5 +1,13 @@
 # 005: A pool on goose-http's outbound connections
 
+Update 2026-11-17: the pool no longer runs on goose-http's loop. `pool.goose` runs on the
+package's own event loop (`eventloop.goose`, `docs/decisions.md`, the entries of
+2026-11-17): the program gives each event to `pg::pool_event`, and `pg::wake` names the
+request an event concerns. The design questions below were settled for goose-http and are
+kept as the record; where they speak of exchanges, mail, `later` and `wait_socket`, the
+pool now has a queue of request keys, `wake`, and per-wait limits renewed by a
+connection's events. Its live test is `test/live/pool.goose`, against Postgres 18.
+
 Status: in-progress. Steps 1 and 2 and the pool's part of step 4 are done
 (2026-10-23); see "Handover" at the end.
 

@@ -1,0 +1,25 @@
+127.0.0.1:5432 -> true len 16
+localhost:80 -> true len 16
+10.0.0.256:1 -> false len 0
+1.2.3:4 -> false len 0
+db.example.com:5432 -> false len 0
+127.0.0.1:70000 -> false len 0
+unix:/tmp/s -> true len 9
+unix: -> false len 0
+listening: true
+nothing to accept: true
+connect started: true
+client writable: true
+connected: true
+accept ready: true
+accepted: true
+nothing to read: true
+sent: true
+server readable: true
+received: 5 hello
+client readable: true
+received: 6 world!
+client sees the close: true
+end of stream: true
+refused: true
+clock moves: true
